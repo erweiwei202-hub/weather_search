@@ -10,6 +10,7 @@ import {
   Droplets,
   Gauge,
   LoaderCircle,
+  ListFilter,
   MapPin,
   Navigation,
   RefreshCw,
@@ -23,6 +24,7 @@ import {
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 const QUICK_CITIES = ["上海", "北京", "广州", "深圳", "成都"];
+const DEFAULT_CONDITION_OPTIONS = ["晴朗", "多云", "阴天", "下雨", "下雪", "雾", "雷雨"];
 
 function valueOrDash(value) {
   return value === null || value === undefined ? "—" : value;
@@ -99,6 +101,13 @@ function App() {
   const [popularCities, setPopularCities] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [provinceOptions, setProvinceOptions] = useState([]);
+  const [provinceConditions, setProvinceConditions] = useState(DEFAULT_CONDITION_OPTIONS);
+  const [selectedProvince, setSelectedProvince] = useState("");
+  const [selectedCondition, setSelectedCondition] = useState("下雨");
+  const [provinceResults, setProvinceResults] = useState(null);
+  const [provinceLoading, setProvinceLoading] = useState(false);
+  const [provinceError, setProvinceError] = useState("");
 
   const loadPopular = useCallback(async () => {
     try {
@@ -108,6 +117,18 @@ function App() {
       setPopularCities(data.items || []);
     } catch {
       // Popular cities are an enhancement; the main weather view stays usable.
+    }
+  }, []);
+
+  const loadProvinceOptions = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/provinces`);
+      if (!response.ok) return;
+      const data = await response.json();
+      setProvinceOptions(data.items || []);
+      setProvinceConditions(data.conditions || DEFAULT_CONDITION_OPTIONS);
+    } catch {
+      // The province filter remains available once the backend is reachable.
     }
   }, []);
 
@@ -141,9 +162,34 @@ function App() {
     }
   }, [loadPopular]);
 
+  async function submitProvinceSearch(event) {
+    event.preventDefault();
+    if (!selectedProvince) {
+      setProvinceError("请选择一个省份");
+      return;
+    }
+    setProvinceLoading(true);
+    setProvinceError("");
+    try {
+      const requestUrl = `${API_BASE}/api/province-weather?province=${encodeURIComponent(selectedProvince)}&condition=${encodeURIComponent(selectedCondition)}`;
+      console.log("[frontend] 正在查询省份天气：", requestUrl);
+      const response = await fetch(requestUrl);
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.detail || "暂时无法获取省份天气数据");
+      console.log("[frontend] 省份天气返回：", payload);
+      setProvinceResults(payload);
+    } catch (requestError) {
+      setProvinceResults(null);
+      setProvinceError(requestError.message || "省份天气服务暂时不可用，请稍后重试");
+    } finally {
+      setProvinceLoading(false);
+    }
+  }
+
   useEffect(() => {
     loadPopular();
-  }, [loadPopular]);
+    loadProvinceOptions();
+  }, [loadPopular, loadProvinceOptions]);
 
   const current = weather?.current;
   const location = weather?.location;
@@ -211,6 +257,68 @@ function App() {
           ))}
           <span className="quick-hint">支持中文、英文城市名</span>
         </div>
+
+        <section className="province-filter panel-section">
+          <div className="section-heading">
+            <div>
+              <span className="section-kicker"><ListFilter size={13} /> PROVINCE WEATHER MAP</span>
+              <h2>按省份筛选天气</h2>
+            </div>
+            <span className="section-side-note">实时城市状态</span>
+          </div>
+          <p className="province-filter-copy">选择省份和当前天气状态，查看该省符合条件的地级市。</p>
+          <form className="province-filter-form" onSubmit={submitProvinceSearch}>
+            <label>
+              <span>省份</span>
+              <select value={selectedProvince} onChange={(event) => setSelectedProvince(event.target.value)}>
+                <option value="">请选择省份</option>
+                {provinceOptions.map((item) => (
+                  <option key={item.name} value={item.name}>{item.name}（{item.city_count} 个城市）</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>天气状态</span>
+              <select value={selectedCondition} onChange={(event) => setSelectedCondition(event.target.value)}>
+                {provinceConditions.map((item) => <option key={item} value={item}>{item}</option>)}
+              </select>
+            </label>
+            <button className="province-search-button" type="submit" disabled={provinceLoading || !selectedProvince}>
+              {provinceLoading ? <LoaderCircle className="spin" size={16} /> : <Search size={16} />}
+              {provinceLoading ? "正在查询" : "查询城市"}
+            </button>
+          </form>
+
+          {provinceError && <div className="province-error" role="alert">{provinceError}</div>}
+
+          {provinceResults && (
+            <div className="province-results">
+              <div className="province-results-heading">
+                <div>
+                  <strong>{provinceResults.province} · {provinceResults.condition}</strong>
+                  <span>已匹配 {provinceResults.matched_count} / {provinceResults.total} 个城市</span>
+                </div>
+                <span>{provinceResults.updated_at ? `更新于 ${formatDateTime(provinceResults.updated_at)}` : "刚刚更新"}</span>
+              </div>
+              {provinceResults.items.length > 0 ? (
+                <div className="province-city-grid">
+                  {provinceResults.items.map((city) => (
+                    <button className="province-city-card" key={city.city_key} onClick={() => loadWeather(city.name)}>
+                      <span className="province-city-topline"><span>{city.name}</span><MapPin size={13} /></span>
+                      <strong>{valueOrDash(city.temperature)}°</strong>
+                      <span>{city.condition?.label || city.condition_category} · 体感 {valueOrDash(city.feels_like)}°</span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="province-empty">当前没有找到符合该天气状态的城市。</div>
+              )}
+              {provinceResults.failed_count > 0 && (
+                <div className="province-warning">有 {provinceResults.failed_count} 个城市暂时无法获取天气数据。</div>
+              )}
+            </div>
+          )}
+        </section>
 
         {error && (
           <div className="error-banner" role="alert">
