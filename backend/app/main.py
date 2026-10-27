@@ -10,7 +10,13 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
+from .china_cities import PROVINCE_CITIES, PROVINCE_OPTIONS
 from .database import CityStore
+from .province_weather import (
+    CONDITION_OPTIONS,
+    ProvinceWeatherUnavailableError,
+    fetch_province_weather,
+)
 from .weather import fetch_weather
 
 
@@ -79,3 +85,29 @@ async def popular_cities(limit: int = Query(6, ge=1, le=20)) -> dict:
     cities = await asyncio.to_thread(city_store.popular, limit)
     logger.info("读取常查城市 limit=%s count=%s", limit, len(cities))
     return {"items": cities, "database": "mongodb" if city_store.connected else "memory"}
+
+
+@app.get("/api/provinces")
+async def provinces() -> dict:
+    return {
+        "items": [
+            {"name": province, "city_count": len(PROVINCE_CITIES[province])}
+            for province in PROVINCE_OPTIONS
+        ],
+        "conditions": list(CONDITION_OPTIONS),
+    }
+
+
+@app.get("/api/province-weather")
+async def province_weather(
+    province: str = Query(..., min_length=2, max_length=20),
+    condition: str = Query(..., min_length=2, max_length=10),
+) -> dict:
+    logger.info("收到省份天气查询请求 province=%s condition=%s", province, condition)
+    try:
+        return await fetch_province_weather(province, condition, settings)
+    except LookupError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except ProvinceWeatherUnavailableError as error:
+        logger.exception("省份天气服务不可用 province=%s condition=%s", province, condition)
+        raise HTTPException(status_code=502, detail=str(error)) from error

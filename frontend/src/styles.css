@@ -58,6 +58,29 @@ button:disabled { cursor: wait; opacity: .7; }
 .quick-city { background: transparent; border: 1px solid rgba(143, 168, 198, .16); border-radius: 999px; color: #9bacbf; font-size: 11px; padding: 6px 12px; transition: all .2s; }
 .quick-city:hover { background: rgba(112, 224, 208, .1); border-color: rgba(112, 224, 208, .5); color: var(--cyan); }
 .quick-hint { color: #61748e; margin-left: 6px; }
+.province-filter { margin-bottom: 16px; }
+.province-filter-copy { color: #8192a8; font-size: 11px; margin: 16px 0 18px; }
+.province-filter-form { align-items: end; display: grid; gap: 12px; grid-template-columns: minmax(180px, 1fr) minmax(160px, .75fr) auto; }
+.province-filter-form label { display: flex; flex-direction: column; gap: 7px; }
+.province-filter-form label > span { color: #8193a9; font-size: 10px; }
+.province-filter-form select { appearance: none; background: #14243a; border: 1px solid rgba(163, 193, 224, .16); border-radius: 9px; color: #e8eef7; font-size: 12px; min-height: 40px; outline: 0; padding: 0 12px; }
+.province-filter-form select:focus { border-color: rgba(112, 224, 208, .6); box-shadow: 0 0 0 3px rgba(112, 224, 208, .08); }
+.province-search-button { align-items: center; background: #72ddce; border: 0; border-radius: 9px; color: #102230; display: flex; font-size: 12px; gap: 7px; justify-content: center; min-height: 40px; padding: 0 17px; transition: background .2s, transform .2s; }
+.province-search-button:hover { background: #9aeadb; transform: translateY(-1px); }
+.province-error { background: rgba(231, 111, 112, .1); border: 1px solid rgba(231, 111, 112, .25); border-radius: 9px; color: #efacad; font-size: 11px; margin-top: 14px; padding: 10px 12px; }
+.province-results { border-top: 1px solid var(--line); margin-top: 21px; padding-top: 18px; }
+.province-results-heading { align-items: center; color: #6f829b; display: flex; font-size: 10px; justify-content: space-between; margin-bottom: 13px; }
+.province-results-heading div { display: flex; flex-direction: column; gap: 5px; }
+.province-results-heading strong { color: #e8f1f4; font-size: 13px; }
+.province-city-grid { display: grid; gap: 8px; grid-template-columns: repeat(4, 1fr); }
+.province-city-card { background: rgba(27, 45, 70, .58); border: 1px solid rgba(148, 179, 213, .11); border-radius: 11px; color: #9dafc1; display: flex; flex-direction: column; gap: 7px; min-height: 106px; padding: 12px; text-align: left; transition: background .2s, border .2s, transform .2s; }
+.province-city-card:hover { background: rgba(112, 224, 208, .08); border-color: rgba(112, 224, 208, .34); transform: translateY(-2px); }
+.province-city-topline { align-items: center; color: #dbe8f0; display: flex; font-size: 12px; font-weight: 600; justify-content: space-between; }
+.province-city-topline svg { color: var(--cyan); }
+.province-city-card strong { color: #f0f7f8; font-size: 25px; font-weight: 500; letter-spacing: -.06em; }
+.province-city-card > span:last-child { color: #8095ab; font-size: 10px; }
+.province-empty { color: #8396aa; font-size: 11px; padding: 15px 0 4px; }
+.province-warning { color: #c8aa77; font-size: 10px; margin-top: 12px; }
 
 .dashboard { animation: rise-in .55s ease both; }
 @keyframes rise-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
@@ -198,6 +221,7 @@ button:disabled { cursor: wait; opacity: .7; }
   .overview-grid { grid-template-columns: 1fr; }
   .insight-card { min-height: 260px; }
   .metric-grid { grid-template-columns: repeat(2, 1fr); }
+  .province-city-grid { grid-template-columns: repeat(3, 1fr); }
   .forecast-item { gap: 12px; grid-template-columns: 90px 32px 1fr 75px 65px; }
   .forecast-wind { display: none; }
 }
@@ -210,6 +234,9 @@ button:disabled { cursor: wait; opacity: .7; }
   .intro-row { align-items: stretch; flex-direction: column; gap: 25px; }
   .intro-copy h1 { font-size: 38px; }
   .search-box { width: 100%; }
+  .province-filter-form { grid-template-columns: 1fr 1fr; }
+  .province-search-button { grid-column: span 2; }
+  .province-city-grid { grid-template-columns: repeat(2, 1fr); }
   .quick-hint { display: none; }
   .current-card { min-height: 350px; padding: 22px 20px; }
   .updated-label { font-size: 8px; }
@@ -240,4 +267,3 @@ button:disabled { cursor: wait; opacity: .7; }
   .sun-panel, .popular-panel { min-height: 195px; }
   .app-footer { align-items: flex-start; flex-direction: column; gap: 12px; }
 }
-
