@@ -1,0 +1,13 @@
+services:
+  mongodb:
+    image: mongo:7
+    container_name: weather-atlas-mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - weather-atlas-mongo:/data/db
+
+volumes:
+  weather-atlas-mongo:
+
