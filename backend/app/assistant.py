@@ -65,17 +65,23 @@ async def ask_weather_assistant(
     weather: dict[str, Any],
     news: Iterable[dict[str, Any]],
     history: Iterable[dict[str, str]] = (),
+    ai_config: dict[str, str] | None = None,
 ) -> str:
-    if not settings.openai_api_key.strip() or not settings.openai_model.strip():
-        raise AssistantConfigurationError("AI 助手尚未配置 OPENAI_API_KEY 或 OPENAI_MODEL")
+    active_config = ai_config or {
+        "base_url": settings.openai_base_url,
+        "api_key": settings.openai_api_key,
+        "model": settings.openai_model,
+    }
+    if not active_config.get("api_key", "").strip() or not active_config.get("model", "").strip():
+        raise AssistantConfigurationError("请先在网页的 AI 设置中填写 API Key 和模型")
 
     client = AsyncOpenAI(
-        api_key=settings.openai_api_key,
-        base_url=settings.openai_base_url or None,
+        api_key=active_config["api_key"],
+        base_url=active_config.get("base_url") or None,
     )
     try:
         response = await client.chat.completions.create(
-            model=settings.openai_model,
+            model=active_config["model"],
             messages=build_assistant_messages(question, city, weather, news, history),
             temperature=0.2,
             max_tokens=600,
@@ -87,7 +93,7 @@ async def ask_weather_assistant(
     except AssistantUnavailableError:
         raise
     except Exception as error:
-        logger.exception("天气助手请求失败 model=%s", settings.openai_model)
+        logger.exception("天气助手请求失败 model=%s", active_config["model"])
         raise AssistantUnavailableError("AI 服务暂时不可用，请检查配置或稍后重试") from error
     finally:
         await client.close()

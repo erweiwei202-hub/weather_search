@@ -4,12 +4,14 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 from typing import Dict, Optional, Union
+from urllib.parse import urlparse
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from .ai_config import AIConfigStorageError
 from .assistant import (
     AssistantConfigurationError,
     AssistantUnavailableError,
@@ -87,6 +89,13 @@ class AssistantRequest(BaseModel):
     history: list[AssistantMessage] = Field(default_factory=list, max_length=8)
 
 
+class AIConfigRequest(BaseModel):
+    base_url: str = Field(min_length=1, max_length=500)
+    model: str = Field(min_length=1, max_length=120)
+    api_key: Optional[str] = Field(default=None, max_length=1000)
+    clear_api_key: bool = False
+
+
 def public_user(user: dict) -> dict:
     return {"user_id": user["user_id"], "username": user["username"]}
 
@@ -146,6 +155,41 @@ async def logout(
     return {"ok": True}
 
 
+@app.get("/api/ai-config")
+async def get_ai_config(user: dict = Depends(get_current_user)) -> dict:
+    return await asyncio.to_thread(auth_store.get_ai_config_view, user["user_id"])
+
+
+@app.put("/api/ai-config")
+async def update_ai_config(
+    payload: AIConfigRequest,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    base_url = payload.base_url.strip().rstrip("/")
+    parsed_url = urlparse(base_url)
+    if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
+        raise HTTPException(status_code=422, detail="API 地址必须是完整的 http 或 https 地址")
+    model = payload.model.strip()
+    if not model:
+        raise HTTPException(status_code=422, detail="模型名称不能为空")
+    if payload.clear_api_key and payload.api_key and payload.api_key.strip():
+        raise HTTPException(status_code=422, detail="不能同时输入新 Key 和清除 Key")
+
+    try:
+        result = await asyncio.to_thread(
+            auth_store.save_ai_config,
+            user["user_id"],
+            base_url,
+            model,
+            payload.api_key,
+            payload.clear_api_key,
+        )
+    except AIConfigStorageError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    logger.info("用户更新 AI 配置 user_id=%s model=%s", user["user_id"], model)
+    return result
+
+
 async def enrich_with_news(payload: dict) -> dict:
     try:
         payload["news"] = await fetch_city_news(payload["location"]["name"], settings)
@@ -164,6 +208,12 @@ async def assistant_chat(
     last_city = await asyncio.to_thread(auth_store.get_last_city, user["user_id"])
     if last_city is None:
         raise HTTPException(status_code=400, detail="请先查询一个城市，再向天气助手提问")
+    try:
+        ai_config = await asyncio.to_thread(auth_store.get_ai_config, user["user_id"])
+    except AIConfigStorageError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    if not ai_config or not ai_config.get("api_key") or not ai_config.get("model"):
+        raise HTTPException(status_code=503, detail="请先在网页的 AI 设置中填写 API Key 和模型")
 
     try:
         weather_payload = await fetch_weather(last_city["name"], settings)
@@ -178,6 +228,7 @@ async def assistant_chat(
             weather=weather_payload,
             news=today_news,
             history=[item.model_dump() for item in payload.history],
+            ai_config=ai_config,
         )
     except AssistantConfigurationError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error

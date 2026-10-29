@@ -11,6 +11,7 @@ from uuid import uuid4
 from pymongo import DESCENDING, MongoClient
 from pymongo.errors import DuplicateKeyError, PyMongoError
 
+from .ai_config import AIConfigCipher
 from .config import Settings
 
 
@@ -191,6 +192,7 @@ class AuthStore:
         self._users: dict[str, dict[str, Any]] = {}
         self._sessions: dict[str, dict[str, Any]] = {}
         self._lock = Lock()
+        self._ai_config_cipher = AIConfigCipher(settings.ai_config_encryption_key)
 
     def connect(self) -> None:
         client: Optional[MongoClient] = None
@@ -292,6 +294,79 @@ class AuthStore:
         with self._lock:
             city = self._users.get(user_id, {}).get("last_city")
             return dict(city) if city else None
+
+    def get_ai_config(self, user_id: str) -> Optional[dict[str, str]]:
+        document = self._find_user_ai_config(user_id)
+        if not document:
+            return None
+        ciphertext = document.get("api_key_ciphertext", "")
+        if not ciphertext:
+            return {
+                "base_url": document.get("base_url", ""),
+                "model": document.get("model", ""),
+                "api_key": "",
+            }
+        return {
+            "base_url": document.get("base_url", ""),
+            "model": document.get("model", ""),
+            "api_key": self._ai_config_cipher.decrypt(ciphertext),
+        }
+
+    def get_ai_config_view(self, user_id: str) -> dict[str, Any]:
+        document = self._find_user_ai_config(user_id) or {}
+        key_hint = document.get("api_key_hint", "")
+        return {
+            "base_url": document.get("base_url", ""),
+            "model": document.get("model", ""),
+            "api_key_configured": bool(document.get("api_key_ciphertext")),
+            "api_key_masked": f"••••{key_hint}" if key_hint else "",
+            "encryption_configured": self._ai_config_cipher.configured,
+        }
+
+    def save_ai_config(
+        self,
+        user_id: str,
+        base_url: str,
+        model: str,
+        api_key: Optional[str] = None,
+        clear_api_key: bool = False,
+    ) -> dict[str, Any]:
+        existing = self._find_user_ai_config(user_id) or {}
+        config: dict[str, Any] = {
+            "base_url": base_url,
+            "model": model,
+            "updated_at": datetime.now(timezone.utc),
+        }
+        if clear_api_key:
+            config["api_key_ciphertext"] = ""
+            config["api_key_hint"] = ""
+        elif api_key is not None:
+            clean_key = api_key.strip()
+            if clean_key:
+                config["api_key_ciphertext"] = self._ai_config_cipher.encrypt(clean_key)
+                config["api_key_hint"] = clean_key[-4:]
+            else:
+                config["api_key_ciphertext"] = existing.get("api_key_ciphertext", "")
+                config["api_key_hint"] = existing.get("api_key_hint", "")
+        else:
+            config["api_key_ciphertext"] = existing.get("api_key_ciphertext", "")
+            config["api_key_hint"] = existing.get("api_key_hint", "")
+
+        if self.users is not None:
+            self.users.update_one({"user_id": user_id}, {"$set": {"ai_config": config}})
+        else:
+            with self._lock:
+                if user_id in self._users:
+                    self._users[user_id]["ai_config"] = config
+        return self.get_ai_config_view(user_id)
+
+    def _find_user_ai_config(self, user_id: str) -> Optional[dict[str, Any]]:
+        if self.users is not None:
+            document = self.users.find_one({"user_id": user_id}, {"_id": 0, "ai_config": 1})
+            return document.get("ai_config") if document else None
+        with self._lock:
+            config = self._users.get(user_id, {}).get("ai_config")
+            return dict(config) if config else None
 
     def create_session(self, user_id: str, ttl_days: int) -> str:
         raw_token = secrets.token_urlsafe(32)

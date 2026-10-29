@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     frontend_origin: str = "http://localhost:5173"
     session_cookie_name: str = "weather_session"
     session_ttl_days: int = 30
+    ai_config_encryption_key: str = ""
     openai_base_url: str = "https://api.openai.com/v1"
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"

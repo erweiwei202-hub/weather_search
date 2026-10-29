@@ -95,6 +95,40 @@ class AuthApiTests(unittest.TestCase):
             self.assertEqual(logout_response.status_code, 200)
             self.assertEqual(client.get("/api/auth/me").status_code, 401)
 
+    def test_ai_config_is_saved_per_user_and_key_is_masked(self) -> None:
+        username = f"ai_user_{uuid4().hex[:10]}"
+        api_key = "secret-api-key-1234"
+        with TestClient(app) as client:
+            register_response = client.post(
+                "/api/auth/register",
+                json={"username": username, "password": "password-123"},
+            )
+            self.assertEqual(register_response.status_code, 201)
+
+            save_response = client.put(
+                "/api/ai-config",
+                json={
+                    "base_url": "https://example.com/v1",
+                    "model": "weather-model",
+                    "api_key": api_key,
+                },
+            )
+            self.assertEqual(save_response.status_code, 200)
+            saved = save_response.json()
+            self.assertTrue(saved["api_key_configured"])
+            self.assertEqual(saved["api_key_masked"], "••••1234")
+            self.assertNotIn(api_key, save_response.text)
+
+            update_response = client.put(
+                "/api/ai-config",
+                json={"base_url": "https://example.com/v2", "model": "new-model"},
+            )
+            self.assertEqual(update_response.status_code, 200)
+            updated = update_response.json()
+            self.assertEqual(updated["base_url"], "https://example.com/v2")
+            self.assertEqual(updated["model"], "new-model")
+            self.assertEqual(updated["api_key_masked"], "••••1234")
+
 
 if __name__ == "__main__":
     unittest.main()

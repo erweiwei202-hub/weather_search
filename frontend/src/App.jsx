@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   ArrowUpRight,
@@ -11,6 +11,7 @@ import {
   Droplets,
   ExternalLink,
   Gauge,
+  KeyRound,
   LogIn,
   LogOut,
   LoaderCircle,
@@ -22,9 +23,12 @@ import {
   RefreshCw,
   Search,
   Send,
+  Settings2,
   Sparkles,
   Sunrise,
   Sunset,
+  ShieldCheck,
+  Save,
   Umbrella,
   UserPlus,
   Wind,
@@ -89,6 +93,60 @@ function Metric({ icon: Icon, label, value, unit, accent = "cyan", children }) {
   );
 }
 
+function HourlyScroller({ hours }) {
+  const scrollerRef = useRef(null);
+  const dragState = useRef({ active: false, startX: 0, startScrollLeft: 0 });
+
+  function handlePointerDown(event) {
+    const scroller = scrollerRef.current;
+    if (!scroller || scroller.scrollWidth <= scroller.clientWidth) return;
+
+    dragState.current = {
+      active: true,
+      startX: event.clientX,
+      startScrollLeft: scroller.scrollLeft,
+    };
+    scroller.classList.add("is-dragging");
+    scroller.setPointerCapture?.(event.pointerId);
+  }
+
+  function handlePointerMove(event) {
+    const scroller = scrollerRef.current;
+    if (!scroller || !dragState.current.active) return;
+    event.preventDefault();
+    scroller.scrollLeft = dragState.current.startScrollLeft - (event.clientX - dragState.current.startX);
+  }
+
+  function stopDragging(event) {
+    const scroller = scrollerRef.current;
+    dragState.current.active = false;
+    scroller?.classList.remove("is-dragging");
+    if (scroller?.hasPointerCapture?.(event.pointerId)) scroller.releasePointerCapture(event.pointerId);
+  }
+
+  return (
+    <div
+      aria-label="逐小时天气趋势，可左右拖动查看更多"
+      className="hourly-scroller"
+      onPointerCancel={stopDragging}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={stopDragging}
+      ref={scrollerRef}
+      title="按住并左右拖动，查看后续小时天气"
+    >
+      {hours.map((hour, index) => (
+        <div className={`hour-item ${index === 0 ? "active" : ""}`} key={hour.time}>
+          <span className="hour-time">{formatHour(hour.time, index)}</span>
+          <WeatherEmoji condition={hour.condition} />
+          <strong>{hour.temperature}°</strong>
+          <span className="hour-rain"><Droplets size={12} /> {hour.precipitation_probability ?? 0}%</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function LoadingState() {
   return (
     <div className="loading-state">
@@ -121,6 +179,18 @@ function App() {
   const [authForm, setAuthForm] = useState({ username: "", password: "" });
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState("");
+  const [aiConfig, setAiConfig] = useState({
+    base_url: "",
+    model: "",
+    api_key_configured: false,
+    api_key_masked: "",
+    encryption_configured: false,
+  });
+  const [aiConfigForm, setAiConfigForm] = useState({ base_url: "", model: "", api_key: "", clear_api_key: false });
+  const [aiConfigOpen, setAiConfigOpen] = useState(false);
+  const [aiConfigLoading, setAiConfigLoading] = useState(false);
+  const [aiConfigMessage, setAiConfigMessage] = useState("");
+  const [aiConfigError, setAiConfigError] = useState("");
   const [assistantMessages, setAssistantMessages] = useState([]);
   const [assistantInput, setAssistantInput] = useState("");
   const [assistantLoading, setAssistantLoading] = useState(false);
@@ -148,6 +218,24 @@ function App() {
       setCurrentUser(data.user || null);
     } catch {
       setCurrentUser(null);
+    }
+  }, []);
+
+  const loadAiConfig = useCallback(async () => {
+    try {
+      const response = await apiFetch(`${API_BASE}/api/ai-config`);
+      if (!response.ok) return;
+      const data = await response.json();
+      setAiConfig(data);
+      setAiConfigForm((previous) => ({
+        ...previous,
+        base_url: data.base_url || previous.base_url,
+        model: data.model || previous.model,
+        api_key: "",
+        clear_api_key: false,
+      }));
+    } catch {
+      // AI settings are optional until the user opens the assistant.
     }
   }, []);
 
@@ -203,7 +291,50 @@ function App() {
       await apiFetch(`${API_BASE}/api/auth/logout`, { method: "POST" });
     } finally {
       setCurrentUser(null);
+      setAiConfig({ base_url: "", model: "", api_key_configured: false, api_key_masked: "", encryption_configured: false });
       await loadPopular();
+    }
+  }
+
+  function openAiConfig() {
+    setAiConfigForm({
+      base_url: aiConfig.base_url || "",
+      model: aiConfig.model || "",
+      api_key: "",
+      clear_api_key: false,
+    });
+    setAiConfigMessage("");
+    setAiConfigError("");
+    setAiConfigOpen(true);
+  }
+
+  async function saveAiConfig(event) {
+    event.preventDefault();
+    setAiConfigLoading(true);
+    setAiConfigMessage("");
+    setAiConfigError("");
+    const requestBody = {
+      base_url: aiConfigForm.base_url,
+      model: aiConfigForm.model,
+      clear_api_key: aiConfigForm.clear_api_key,
+    };
+    if (aiConfigForm.api_key.trim()) requestBody.api_key = aiConfigForm.api_key.trim();
+
+    try {
+      const response = await apiFetch(`${API_BASE}/api/ai-config`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(requestBody),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.detail || "AI 配置保存失败");
+      setAiConfig(payload);
+      setAiConfigForm((previous) => ({ ...previous, api_key: "", clear_api_key: false }));
+      setAiConfigMessage("配置已保存，天气助手现在会使用这组设置。");
+    } catch (requestError) {
+      setAiConfigError(requestError.message || "AI 配置保存失败");
+    } finally {
+      setAiConfigLoading(false);
     }
   }
 
@@ -308,13 +439,16 @@ function App() {
   }, [loadCurrentUser, loadPopular, loadProvinceOptions]);
 
   useEffect(() => {
-    if (currentUser) loadPopular();
-  }, [currentUser, loadPopular]);
+    if (currentUser) {
+      loadPopular();
+      loadAiConfig();
+    }
+  }, [currentUser, loadAiConfig, loadPopular]);
 
   const current = weather?.current;
   const location = weather?.location;
   const today = weather?.daily?.[0];
-  const nextHours = weather?.hourly?.slice(0, 10) || [];
+  const nextHours = weather?.hourly || [];
   const databaseMode = currentUser ? "已记录你的常用城市" : "登录后保存你的常用城市";
   const summary = useMemo(() => {
     if (!current || !today) return "";
@@ -349,6 +483,9 @@ function App() {
           {currentUser ? (
             <div className="account-controls">
               <span className="account-name">你好，{currentUser.username}</span>
+              <button className="account-button" onClick={openAiConfig} type="button">
+                <Settings2 size={14} />AI 设置
+              </button>
               <button className="account-button" onClick={logout} type="button">
                 <LogOut size={14} />退出
               </button>
@@ -424,6 +561,70 @@ function App() {
             >
               {authMode === "login" ? "还没有账号？去注册" : "已经有账号？去登录"}
             </button>
+          </div>
+        </div>
+      )}
+
+      {aiConfigOpen && (
+        <div className="auth-overlay" role="presentation">
+          <div className="auth-card ai-config-card" role="dialog" aria-modal="true" aria-labelledby="ai-config-title">
+            <button className="auth-close" onClick={() => setAiConfigOpen(false)} type="button" aria-label="关闭">
+              <X size={17} />
+            </button>
+            <span className="section-kicker"><Settings2 size={13} /> PERSONAL AI SETTINGS</span>
+            <h2 id="ai-config-title">配置天气助手</h2>
+            <p className="auth-description">填写你自己的 OpenAI 兼容接口。配置会保存到当前账号，之后可以随时修改。</p>
+            <div className="ai-config-security-note">
+              <ShieldCheck size={17} />
+              <span>API Key 只会在后端加密保存，网页不会显示完整 Key。</span>
+            </div>
+            <form className="auth-form ai-config-form" onSubmit={saveAiConfig}>
+              <label>
+                <span>API 地址</span>
+                <input
+                  type="url"
+                  value={aiConfigForm.base_url}
+                  onChange={(event) => setAiConfigForm({ ...aiConfigForm, base_url: event.target.value })}
+                  placeholder="例如：https://api.openai.com/v1"
+                  required
+                />
+              </label>
+              <label>
+                <span>模型名称</span>
+                <input
+                  value={aiConfigForm.model}
+                  onChange={(event) => setAiConfigForm({ ...aiConfigForm, model: event.target.value })}
+                  placeholder="例如：gpt-4o-mini"
+                  required
+                />
+              </label>
+              <label>
+                <span>API Key {aiConfig.api_key_configured && <em className="ai-key-status">已保存 {aiConfig.api_key_masked}</em>}</span>
+                <input
+                  autoComplete="new-password"
+                  type="password"
+                  value={aiConfigForm.api_key}
+                  onChange={(event) => setAiConfigForm({ ...aiConfigForm, api_key: event.target.value, clear_api_key: false })}
+                  placeholder={aiConfig.api_key_configured ? "留空表示保持原 Key 不变" : "输入你的 API Key"}
+                />
+              </label>
+              {aiConfig.api_key_configured && (
+                <label className="ai-config-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={aiConfigForm.clear_api_key}
+                    onChange={(event) => setAiConfigForm({ ...aiConfigForm, clear_api_key: event.target.checked, api_key: "" })}
+                  />
+                  <span>清除当前已保存的 API Key</span>
+                </label>
+              )}
+              {aiConfigError && <div className="auth-error" role="alert">{aiConfigError}</div>}
+              {aiConfigMessage && <div className="ai-config-success" role="status">{aiConfigMessage}</div>}
+              <button className="auth-submit" disabled={aiConfigLoading} type="submit">
+                {aiConfigLoading ? <LoaderCircle className="spin" size={16} /> : <Save size={16} />}
+                {aiConfigLoading ? "正在保存" : "保存 AI 配置"}
+              </button>
+            </form>
           </div>
         </div>
       )}
@@ -580,7 +781,7 @@ function App() {
                   {currentUser ? `最近查询：${location.name}` : "登录后可使用"}
                 </span>
               </div>
-              {currentUser ? (
+              {currentUser && aiConfig.api_key_configured ? (
                 <>
                   <div className="assistant-messages" aria-live="polite">
                     {assistantMessages.length === 0 ? (
@@ -609,6 +810,11 @@ function App() {
                   </form>
                   {assistantError && <div className="assistant-error" role="alert">{assistantError}</div>}
                 </>
+              ) : currentUser ? (
+                <div className="assistant-login-prompt">
+                  <div><strong>先配置你的 AI 接口</strong><span>配置保存到当前账号，API Key 由后端加密保管。</span></div>
+                  <button className="outline-button" type="button" onClick={openAiConfig}><KeyRound size={15} />配置 AI</button>
+                </div>
               ) : (
                 <div className="assistant-login-prompt">
                   <div><strong>登录后，助手会记住你最近查询的城市</strong><span>你的问题不会把 API Key 暴露给浏览器。</span></div>
@@ -663,18 +869,9 @@ function App() {
             <section className="panel-section hourly-section">
               <div className="section-heading">
                 <div><span className="section-kicker">NEXT 24 HOURS</span><h2>逐小时趋势</h2></div>
-                <span className="section-side-note">接下来 24 小时</span>
+                <span className="section-side-note">接下来 24 小时 · 可左右拖动</span>
               </div>
-              <div className="hourly-scroller">
-                {nextHours.map((hour, index) => (
-                  <div className={`hour-item ${index === 0 ? "active" : ""}`} key={hour.time}>
-                    <span className="hour-time">{formatHour(hour.time, index)}</span>
-                    <WeatherEmoji condition={hour.condition} />
-                    <strong>{hour.temperature}°</strong>
-                    <span className="hour-rain"><Droplets size={12} /> {hour.precipitation_probability ?? 0}%</span>
-                  </div>
-                ))}
-              </div>
+              <HourlyScroller hours={nextHours} />
             </section>
 
             <section className="panel-section forecast-section">
