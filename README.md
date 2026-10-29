@@ -9,6 +9,9 @@
 - 趋势查看：未来 24 小时逐小时趋势和未来 7 天预报。
 - 日照信息：日出、日落、UV 指数。
 - 常查城市：每次成功搜索自动累加查询次数，按热度展示。
+- 账号登录：注册、登录、退出，登录后常查城市按用户隔离保存。
+- 天气助手：登录后可询问最近查询城市的天气问题，使用 OpenAI 兼容接口。
+- 今日新闻：城市天气返回当天可验证新闻的标题、来源、发布时间和原文链接。
 - 数据源：Open-Meteo，无需申请 API Key。
 - 本地体验：MongoDB 不可用时后端自动使用内存存储，不影响查看天气和体验 UI；接入 MongoDB 后自动持久化。
 
@@ -70,6 +73,11 @@ npm run dev
 | GET | `/api/health` | 服务和数据库状态 |
 | GET | `/api/weather?city=上海` | 查询城市天气并记录热度 |
 | GET | `/api/cities?limit=6` | 获取常查城市 |
+| POST | `/api/auth/register` | 注册并登录 |
+| POST | `/api/auth/login` | 登录 |
+| POST | `/api/auth/logout` | 退出登录 |
+| GET | `/api/auth/me` | 获取当前用户 |
+| POST | `/api/assistant/chat` | 向天气助手提问 |
 
 ## 环境变量
 
@@ -79,7 +87,12 @@ npm run dev
 MONGO_URL=mongodb://localhost:27017
 MONGO_DB=weather_atlas
 FRONTEND_ORIGIN=http://localhost:5173
+OPENAI_BASE_URL=https://api.openai.com/v1
+OPENAI_API_KEY=你的API Key
+OPENAI_MODEL=gpt-4o-mini
 ```
+
+`OPENAI_BASE_URL` 可以替换为兼容 OpenAI Chat Completions 格式的服务地址。API Key 只放在 `backend/.env`，不要提交到 Git。今日新闻默认使用 Google News RSS，不需要额外新闻 API Key。
 
 前端环境变量放在 `frontend/.env`：
 

@@ -2,29 +2,42 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Activity,
   ArrowUpRight,
+  Bot,
   CalendarDays,
   ChevronRight,
   CloudRain,
   CloudSun,
   Database,
   Droplets,
+  ExternalLink,
   Gauge,
+  LogIn,
+  LogOut,
   LoaderCircle,
   ListFilter,
   MapPin,
+  MessageCircle,
   Navigation,
+  Newspaper,
   RefreshCw,
   Search,
+  Send,
   Sparkles,
   Sunrise,
   Sunset,
   Umbrella,
+  UserPlus,
   Wind,
+  X,
 } from "lucide-react";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 const QUICK_CITIES = ["上海", "北京", "广州", "深圳", "成都"];
 const DEFAULT_CONDITION_OPTIONS = ["晴朗", "多云", "阴天", "下雨", "下雪", "雾", "雷雨"];
+
+function apiFetch(url, options = {}) {
+  return fetch(url, { ...options, credentials: "include" });
+}
 
 function valueOrDash(value) {
   return value === null || value === undefined ? "—" : value;
@@ -46,6 +59,11 @@ function formatDateTime(iso) {
   if (!iso) return "刚刚更新";
   const [date, time] = iso.split("T");
   return `${date.replaceAll("-", "/")} ${time?.slice(0, 5) || ""}`;
+}
+
+function formatNewsTime(iso) {
+  if (!iso) return "时间未知";
+  return new Date(iso).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
 }
 
 function formatWindDirection(degrees) {
@@ -97,6 +115,16 @@ function EmptyState({ onSelect }) {
 
 function App() {
   const [cityInput, setCityInput] = useState("");
+  const [currentUser, setCurrentUser] = useState(null);
+  const [authMode, setAuthMode] = useState("login");
+  const [authOpen, setAuthOpen] = useState(false);
+  const [authForm, setAuthForm] = useState({ username: "", password: "" });
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authError, setAuthError] = useState("");
+  const [assistantMessages, setAssistantMessages] = useState([]);
+  const [assistantInput, setAssistantInput] = useState("");
+  const [assistantLoading, setAssistantLoading] = useState(false);
+  const [assistantError, setAssistantError] = useState("");
   const [weather, setWeather] = useState(null);
   const [popularCities, setPopularCities] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -109,9 +137,23 @@ function App() {
   const [provinceLoading, setProvinceLoading] = useState(false);
   const [provinceError, setProvinceError] = useState("");
 
+  const loadCurrentUser = useCallback(async () => {
+    try {
+      const response = await apiFetch(`${API_BASE}/api/auth/me`);
+      if (!response.ok) {
+        setCurrentUser(null);
+        return;
+      }
+      const data = await response.json();
+      setCurrentUser(data.user || null);
+    } catch {
+      setCurrentUser(null);
+    }
+  }, []);
+
   const loadPopular = useCallback(async () => {
     try {
-      const response = await fetch(`${API_BASE}/api/cities?limit=6`);
+      const response = await apiFetch(`${API_BASE}/api/cities?limit=6`);
       if (!response.ok) return;
       const data = await response.json();
       setPopularCities(data.items || []);
@@ -122,7 +164,7 @@ function App() {
 
   const loadProvinceOptions = useCallback(async () => {
     try {
-      const response = await fetch(`${API_BASE}/api/provinces`);
+      const response = await apiFetch(`${API_BASE}/api/provinces`);
       if (!response.ok) return;
       const data = await response.json();
       setProvinceOptions(data.items || []);
@@ -131,6 +173,77 @@ function App() {
       // The province filter remains available once the backend is reachable.
     }
   }, []);
+
+  async function submitAuth(event) {
+    event.preventDefault();
+    setAuthLoading(true);
+    setAuthError("");
+    try {
+      const endpoint = authMode === "login" ? "/api/auth/login" : "/api/auth/register";
+      const response = await apiFetch(`${API_BASE}${endpoint}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(authForm),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.detail || "身份验证失败，请稍后重试");
+      setCurrentUser(payload.user || null);
+      setAuthOpen(false);
+      setAuthForm({ username: "", password: "" });
+      await loadPopular();
+    } catch (requestError) {
+      setAuthError(requestError.message || "身份验证失败，请稍后重试");
+    } finally {
+      setAuthLoading(false);
+    }
+  }
+
+  async function logout() {
+    try {
+      await apiFetch(`${API_BASE}/api/auth/logout`, { method: "POST" });
+    } finally {
+      setCurrentUser(null);
+      await loadPopular();
+    }
+  }
+
+  async function submitAssistant(event) {
+    event.preventDefault();
+    const question = assistantInput.trim();
+    if (!question || assistantLoading) return;
+    if (!currentUser) {
+      setAuthMode("login");
+      setAuthOpen(true);
+      setAssistantError("请先登录，天气助手才能记住你最近查询的城市");
+      return;
+    }
+
+    setAssistantInput("");
+    setAssistantError("");
+    setAssistantLoading(true);
+    try {
+      const response = await apiFetch(`${API_BASE}/api/assistant/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: question,
+          history: assistantMessages.slice(-6),
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.detail || "天气助手暂时不可用");
+      setAssistantMessages((previous) => [
+        ...previous,
+        { role: "user", content: question },
+        { role: "assistant", content: payload.answer },
+      ]);
+    } catch (requestError) {
+      setAssistantError(requestError.message || "天气助手暂时不可用");
+      setAssistantInput(question);
+    } finally {
+      setAssistantLoading(false);
+    }
+  }
 
   const loadWeather = useCallback(async (city) => {
     const query = city.trim();
@@ -145,7 +258,7 @@ function App() {
       const requestUrl =
       `${API_BASE}/api/weather?city=${encodeURIComponent(query)}`;
       console.log("[frontend] 正在发送天气请求：", requestUrl);
-      const response = await fetch(`${API_BASE}/api/weather?city=${encodeURIComponent(query)}`);
+      const response = await apiFetch(requestUrl);
       const payload = await response.json();
       console.log("[frontend] 后端返回：", {
       status: response.status,
@@ -154,6 +267,8 @@ function App() {
       if (!response.ok) throw new Error(payload.detail || "暂时无法获取天气数据");
       setWeather(payload);
       setCityInput(payload.location.name);
+      setAssistantMessages([]);
+      setAssistantError("");
       await loadPopular();
     } catch (requestError) {
       setError(requestError.message || "天气服务暂时不可用，请稍后重试");
@@ -173,7 +288,7 @@ function App() {
     try {
       const requestUrl = `${API_BASE}/api/province-weather?province=${encodeURIComponent(selectedProvince)}&condition=${encodeURIComponent(selectedCondition)}`;
       console.log("[frontend] 正在查询省份天气：", requestUrl);
-      const response = await fetch(requestUrl);
+      const response = await apiFetch(requestUrl);
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.detail || "暂时无法获取省份天气数据");
       console.log("[frontend] 省份天气返回：", payload);
@@ -187,15 +302,20 @@ function App() {
   }
 
   useEffect(() => {
+    loadCurrentUser();
     loadPopular();
     loadProvinceOptions();
-  }, [loadPopular, loadProvinceOptions]);
+  }, [loadCurrentUser, loadPopular, loadProvinceOptions]);
+
+  useEffect(() => {
+    if (currentUser) loadPopular();
+  }, [currentUser, loadPopular]);
 
   const current = weather?.current;
   const location = weather?.location;
   const today = weather?.daily?.[0];
   const nextHours = weather?.hourly?.slice(0, 10) || [];
-  const databaseMode = popularCities.length > 0 ? "已记录你的常用城市" : "探索你的常用城市";
+  const databaseMode = currentUser ? "已记录你的常用城市" : "登录后保存你的常用城市";
   const summary = useMemo(() => {
     if (!current || !today) return "";
     const rain = today.precipitation_probability;
@@ -226,8 +346,87 @@ function App() {
         <div className="topbar-status">
           <span className="live-indicator"><i />实时连接</span>
           <span className="data-source">OPEN-METEO DATA</span>
+          {currentUser ? (
+            <div className="account-controls">
+              <span className="account-name">你好，{currentUser.username}</span>
+              <button className="account-button" onClick={logout} type="button">
+                <LogOut size={14} />退出
+              </button>
+            </div>
+          ) : (
+            <div className="account-controls">
+              <button
+                className="account-button"
+                onClick={() => { setAuthMode("login"); setAuthOpen(true); setAuthError(""); }}
+                type="button"
+              >
+                <LogIn size={14} />登录
+              </button>
+              <button
+                className="account-button account-button-primary"
+                onClick={() => { setAuthMode("register"); setAuthOpen(true); setAuthError(""); }}
+                type="button"
+              >
+                <UserPlus size={14} />注册
+              </button>
+            </div>
+          )}
         </div>
       </header>
+
+      {authOpen && (
+        <div className="auth-overlay" role="presentation">
+          <div className="auth-card" role="dialog" aria-modal="true" aria-labelledby="auth-title">
+            <button className="auth-close" onClick={() => setAuthOpen(false)} type="button" aria-label="关闭">
+              <X size={17} />
+            </button>
+            <span className="section-kicker">PERSONAL WEATHER DESK</span>
+            <h2 id="auth-title">{authMode === "login" ? "登录你的气象台" : "创建气象台账号"}</h2>
+            <p className="auth-description">
+              {authMode === "login" ? "登录后可以保存属于你的常查城市。" : "注册后查询过的城市会保存在你的账号下。"}
+            </p>
+            <form className="auth-form" onSubmit={submitAuth}>
+              <label>
+                <span>用户名</span>
+                <input
+                  autoComplete="username"
+                  minLength={3}
+                  maxLength={32}
+                  value={authForm.username}
+                  onChange={(event) => setAuthForm({ ...authForm, username: event.target.value })}
+                  placeholder="至少 3 个字符"
+                  required
+                />
+              </label>
+              <label>
+                <span>密码</span>
+                <input
+                  autoComplete={authMode === "login" ? "current-password" : "new-password"}
+                  minLength={8}
+                  maxLength={128}
+                  type="password"
+                  value={authForm.password}
+                  onChange={(event) => setAuthForm({ ...authForm, password: event.target.value })}
+                  placeholder="至少 8 个字符"
+                  required
+                />
+              </label>
+              {authError && <div className="auth-error" role="alert">{authError}</div>}
+              <button className="auth-submit" disabled={authLoading} type="submit">
+                {authLoading ? <LoaderCircle className="spin" size={16} /> : authMode === "login" ? <LogIn size={16} /> : <UserPlus size={16} />}
+                {authLoading ? "正在处理" : authMode === "login" ? "登录" : "注册并登录"}
+              </button>
+            </form>
+            <button
+              className="auth-switch"
+              onClick={() => { setAuthMode(authMode === "login" ? "register" : "login"); setAuthError(""); }}
+              type="button"
+            >
+              {authMode === "login" ? "还没有账号？去注册" : "已经有账号？去登录"}
+            </button>
+          </div>
+        </div>
+      )}
 
       <main className="page-width main-content">
         <section className="intro-row">
@@ -371,6 +570,81 @@ function App() {
               </article>
             </section>
 
+            <section className="panel-section assistant-panel">
+              <div className="section-heading">
+                <div>
+                  <span className="section-kicker"><Bot size={13} /> WEATHER AI ASSISTANT</span>
+                  <h2>天气助手</h2>
+                </div>
+                <span className="section-side-note">
+                  {currentUser ? `最近查询：${location.name}` : "登录后可使用"}
+                </span>
+              </div>
+              {currentUser ? (
+                <>
+                  <div className="assistant-messages" aria-live="polite">
+                    {assistantMessages.length === 0 ? (
+                      <div className="assistant-placeholder">
+                        <MessageCircle size={18} />
+                        <span>可以问我：“今天适合出门吗？”、“需要带伞吗？”</span>
+                      </div>
+                    ) : assistantMessages.map((message, index) => (
+                      <div className={`assistant-message assistant-message-${message.role}`} key={`${message.role}-${index}`}>
+                        <span>{message.role === "assistant" ? "AI" : "你"}</span>
+                        <p>{message.content}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <form className="assistant-form" onSubmit={submitAssistant}>
+                    <input
+                      aria-label="询问天气助手"
+                      value={assistantInput}
+                      onChange={(event) => setAssistantInput(event.target.value)}
+                      placeholder={`基于${location.name}的天气，问我一个问题`}
+                      maxLength={1000}
+                    />
+                    <button type="submit" disabled={assistantLoading || !assistantInput.trim()} aria-label="发送问题">
+                      {assistantLoading ? <LoaderCircle className="spin" size={17} /> : <Send size={17} />}
+                    </button>
+                  </form>
+                  {assistantError && <div className="assistant-error" role="alert">{assistantError}</div>}
+                </>
+              ) : (
+                <div className="assistant-login-prompt">
+                  <div><strong>登录后，助手会记住你最近查询的城市</strong><span>你的问题不会把 API Key 暴露给浏览器。</span></div>
+                  <button className="outline-button" type="button" onClick={() => { setAuthMode("login"); setAuthOpen(true); }}><LogIn size={15} />登录使用</button>
+                </div>
+              )}
+            </section>
+
+            <section className="panel-section news-panel">
+              <div className="section-heading">
+                <div>
+                  <span className="section-kicker"><Newspaper size={13} /> TODAY'S VERIFIED NEWS</span>
+                  <h2>{location.name} · 今日新闻</h2>
+                </div>
+                <span className="section-side-note">Google News RSS</span>
+              </div>
+              {weather.news?.length > 0 ? (
+                <div className="news-list">
+                  {weather.news.map((article) => (
+                    <a className="news-item" href={article.url} key={article.url} target="_blank" rel="noreferrer">
+                      <span className="news-item-copy">
+                        <strong>{article.title}</strong>
+                        <span>{article.source || "来源未知"} · {formatNewsTime(article.published_at)}</span>
+                      </span>
+                      <ExternalLink size={15} />
+                    </a>
+                  ))}
+                </div>
+              ) : (
+                <div className="news-empty">
+                  <Newspaper size={18} />
+                  <span>{weather.news_status === "unavailable" ? "新闻源暂时不可用，不影响天气查询。" : "今天暂时没有找到可验证的相关新闻。"}</span>
+                </div>
+              )}
+            </section>
+
             <section className="metric-grid">
               <Metric icon={Droplets} label="相对湿度" value={current.humidity} unit="%" accent="cyan">
                 <div className="metric-progress"><span style={{ width: `${current.humidity || 0}%` }} /></div>
@@ -435,7 +709,7 @@ function App() {
               </div>
               <div className="panel-section popular-panel">
                 <div className="section-heading">
-                  <div><span className="section-kicker">FREQUENTLY CHECKED</span><h2>常查城市</h2></div>
+                  <div><span className="section-kicker">FREQUENTLY CHECKED</span><h2>{currentUser ? "我的常查城市" : "热门城市"}</h2></div>
                   <Database size={18} className="muted-icon" />
                 </div>
                 {popularCities.length > 0 ? (
@@ -446,7 +720,7 @@ function App() {
                       </button>
                     ))}
                   </div>
-                ) : <div className="popular-empty">{databaseMode}<span>搜索城市后会自动记录</span></div>}
+                ) : <div className="popular-empty">{databaseMode}<span>{currentUser ? "搜索城市后会自动记录" : "登录后，搜索城市会自动记录到你的账号"}</span></div>}
               </div>
             </section>
 
