@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+import re
+from typing import Any, Dict, Iterable, Optional
 
 import httpx
+from pypinyin import lazy_pinyin
 
 from .config import Settings
 
@@ -41,6 +43,7 @@ WEATHER_CODES: dict[int, tuple[str, str]] = {
     96: ("雷雨伴冰雹", "⛈️"),
     99: ("强雷雨伴冰雹", "⛈️"),
 }
+CITY_SUFFIXES = ("特别行政区", "自治州", "地区", "盟", "市", "县", "区")
 
 
 def descriptor(code: Optional[int], is_day: int = 1) -> dict[str, Any]:
@@ -74,23 +77,74 @@ def city_from_result(result: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def city_query_candidates(city_query: str) -> list[str]:
+    """Return Chinese and pinyin variants for geocoding providers."""
+    query = re.sub(r"\s+", "", city_query.strip())
+    candidates = [query]
+    simplified = query
+    for suffix in CITY_SUFFIXES:
+        if simplified.endswith(suffix) and len(simplified) > len(suffix):
+            simplified = simplified[: -len(suffix)]
+            break
+    if simplified and simplified != query:
+        candidates.append(simplified)
+
+    for variant in (query, simplified):
+        pinyin = "".join(lazy_pinyin(variant))
+        if pinyin and pinyin.lower() not in {item.lower() for item in candidates}:
+            candidates.append(pinyin)
+    return candidates
+
+
+def choose_geocoding_result(results: Iterable[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    chinese_results = [
+        item for item in results
+        if item.get("country_code", "").upper() == "CN"
+    ]
+    if not chinese_results:
+        return None
+
+    city_results = [
+        item for item in chinese_results
+        if item.get("feature_code", "").startswith(("PPLA", "PPLC"))
+    ]
+    candidates = city_results or chinese_results
+    return max(candidates, key=lambda item: item.get("population") or 0)
+
+
+async def geocode_city(
+    client: httpx.AsyncClient,
+    city_query: str,
+    settings: Settings,
+) -> Dict[str, Any]:
+    for candidate in city_query_candidates(city_query):
+        geocode_response = await client.get(
+            settings.open_meteo_geocoding_url,
+            params={
+                "name": candidate,
+                "count": 10,
+                "language": "zh",
+                "countryCode": "CN",
+                "format": "json",
+            },
+        )
+        geocode_response.raise_for_status()
+        location_result = choose_geocoding_result(geocode_response.json().get("results", []))
+        if location_result is not None:
+            logger.info("城市定位候选命中 query=%s candidate=%s", city_query, candidate)
+            return location_result
+
+    logger.warning("没有找到对应的中国城市 city=%s", city_query)
+    raise LookupError(f"没有找到“{city_query}”对应的中国城市")
+
+
 async def fetch_weather(city_query: str, settings: Settings) -> dict[str, Any]:
     timeout = httpx.Timeout(15.0, connect=8.0)
     logger.info("开始查询天气 city=%s", city_query)
     headers = {"User-Agent": "WeatherAtlas/1.0"}
     async with httpx.AsyncClient(timeout=timeout, headers=headers) as client:
-        geocode_response = await client.get(
-            settings.open_meteo_geocoding_url,
-            params={"name": city_query, "count": 1, "language": "zh", "countryCode": "CN", "format": "json"},
-        )
-        geocode_response.raise_for_status()
-        geocode = geocode_response.json()
-        results = geocode.get("results", [])
-        if not results or results[0].get("country_code", "").upper() != "CN":
-            logger.warning("没有找到对应的中国城市 city=%s", city_query)
-            raise LookupError(f"没有找到“{city_query}”对应的中国城市")
-
-        location = city_from_result(results[0])
+        location_result = await geocode_city(client, city_query, settings)
+        location = city_from_result(location_result)
         logger.info(
             "城市定位完成 query=%s location=%s latitude=%s longitude=%s",
             city_query,

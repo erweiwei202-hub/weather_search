@@ -8,7 +8,7 @@ import httpx
 
 from .china_cities import PROVINCE_CITIES, PROVINCE_OPTIONS
 from .config import Settings
-from .weather import city_from_result, descriptor, number
+from .weather import city_from_result, descriptor, geocode_city, number
 
 
 logger = logging.getLogger(__name__)
@@ -68,25 +68,7 @@ async def _fetch_city_current(
     city: str,
     settings: Settings,
 ) -> Dict[str, Any]:
-    geocode_response = await client.get(
-        settings.open_meteo_geocoding_url,
-        params={
-            "name": city,
-            "count": 5,
-            "language": "zh",
-            "countryCode": "CN",
-            "format": "json",
-        },
-    )
-    geocode_response.raise_for_status()
-    results = geocode_response.json().get("results", [])
-    result = next(
-        (item for item in results if item.get("country_code", "").upper() == "CN"),
-        None,
-    )
-    if result is None:
-        raise LookupError(f"没有找到“{city}”对应的中国城市")
-
+    result = await geocode_city(client, city, settings)
     location = city_from_result(result)
     forecast_response = await client.get(
         settings.open_meteo_forecast_url,

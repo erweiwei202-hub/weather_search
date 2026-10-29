@@ -10,6 +10,7 @@ from backend.app.province_weather import (
     valid_condition,
     valid_province,
 )
+from backend.app.weather import city_query_candidates, choose_geocoding_result
 
 
 class ProvinceWeatherTests(unittest.TestCase):
@@ -40,6 +41,21 @@ class ProvinceWeatherTests(unittest.TestCase):
         self.assertTrue(valid_condition("下雨"))
         self.assertFalse(valid_condition("高温"))
         self.assertEqual(len(CONDITION_OPTIONS), 7)
+
+    def test_chinese_city_uses_pinyin_fallback(self) -> None:
+        candidates = city_query_candidates("温州市")
+
+        self.assertEqual(candidates[0], "温州市")
+        self.assertIn("温州", candidates)
+        self.assertIn("wenzhou", candidates)
+
+    def test_city_result_is_preferred_over_non_city_place(self) -> None:
+        result = choose_geocoding_result([
+            {"name": "温州永强国际机场", "country_code": "CN", "feature_code": "AIRP", "population": 100000},
+            {"name": "温州市", "country_code": "CN", "feature_code": "PPLA3", "population": 2650000},
+        ])
+
+        self.assertEqual(result["name"], "温州市")
 
 
 if __name__ == "__main__":

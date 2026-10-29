@@ -20,7 +20,8 @@
 
 - 每次修改、测试和验证完成后，向用户报告修改内容与测试结果，并询问是否需要创建 Git commit 备份。
 - 未获得用户明确同意前，不要自动执行 `git add` 或 `git commit`。
-- 用户同意后，使用清晰、简短的 commit message，并报告提交结果。
+- 用户同意后，必须使用一目了然的 commit message，明确说明本次改动内容；优先使用 `type(scope): summary` 格式，例如 `feat(city-search): support all China cities`、`fix(weather): handle missing city results`。
+- commit message 应与实际改动一致，避免使用 `update`、`修改代码`、`临时提交` 等无法说明内容的描述，并在提交后报告提交结果。
 - 提交前检查工作区，避免把 `.env`、凭据、私钥、虚拟环境、依赖缓存或生成文件提交进去。
 
 ## 最终报告
